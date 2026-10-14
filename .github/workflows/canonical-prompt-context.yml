@@ -1,0 +1,41 @@
+name: Native canonical prompt context
+
+on:
+  pull_request:
+    paths:
+      - run_agent.py
+      - agent/agent_init.py
+      - agent/agent_init_params.py
+      - agent/canonical_prompt_context.py
+      - agent/system_prompt.py
+      - tests/agent/test_canonical_prompt_context.py
+      - .github/workflows/canonical-prompt-context.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-prompt-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prompt-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare pinned toolchain and isolated test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: python
+          extras: '[]'
+          test-environment: 'true'
+      - name: Official isolated native canonical prompt regressions
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: bash scripts/run_tests.sh tests/agent/test_canonical_prompt_context.py tests/agent/test_builtin_memory_injection.py -j 1 --file-timeout 90
+      - name: Blocking repository lint checks
+        run: python3 scripts/check --base origin/main

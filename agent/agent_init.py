@@ -2330,7 +2330,7 @@ def init_agent(
     checkpoint_max_snapshots: int = 20, checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10, pass_session_id: bool = False,
     requested_provider: str | None = None, capabilities: Optional[dict[str, bool]] = None, cwd: Optional[str] = None,
-    side_agent: bool = False, memory_manager=None, builtin_memory_store=None,
+    side_agent: bool = False, memory_manager=None, builtin_memory_store=None, prompt_context_provider=None,
     tool_result_metadata_callback: Optional[Callable[..., dict]] = None,
 ):
     _install_safe_stdio()
@@ -2373,6 +2373,9 @@ def init_agent(
     agent.acp_args = list(acp_args or args or [])
     _resolve_api_mode(agent, api_mode, provider_name, base_url)
     _finalize_routing(agent, api_mode, credential_pool)
+
+    from agent.canonical_prompt_context import validate_prompt_context_provider
+    validate_prompt_context_provider(prompt_context_provider)
 
     # Platform callbacks are stored under their parameter names verbatim.
     for _cb in _CALLBACK_PARAMS:

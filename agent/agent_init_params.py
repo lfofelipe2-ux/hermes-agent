@@ -29,5 +29,5 @@ _CALLBACK_PARAMS = (
     "setup_beat_callback", "step_callback", "stream_delta_callback",
     "interim_assistant_callback",
     "status_callback", "notice_callback", "notice_clear_callback",
-    "event_callback", "reaction_callback", "tool_gen_callback",
+    "event_callback", "reaction_callback", "tool_gen_callback", "prompt_context_provider",
 )
