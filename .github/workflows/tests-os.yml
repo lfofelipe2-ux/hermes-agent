@@ -121,6 +121,22 @@ jobs:
           test-environment: 'true'
           prune-python-cache: true
 
+      - name: Diagnose cold Windows ARM update outcome fixture
+        if: runner.os == 'Windows' && runner.arch == 'ARM64' && github.repository != 'NousResearch/hermes-agent'
+        shell: bash
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: |
+          # This exact file exceeded the native default 300s before pytest could
+          # report its timestamp assertion on the ordinary fork ARM runner.
+          # Run it alone with a bounded diagnostic budget; preserve every test
+          # and the full normal lane below. Native duration caching then keeps
+          # this observed file cost rather than guessing a global timeout.
+          bash scripts/run_tests.sh \
+            tests/scripts/desktop_update/test_desktop_update_windows_commit_outcome.py \
+            -j 1 --file-timeout 600 -- \
+            -m "platforms and not integration" -v --tb=short
+
       - name: Run ${{ matrix.marker }} tests
         # scripts/run_tests.sh — the canonical runner, same as every other
         # lane: per-file subprocess isolation (run_tests_parallel.py). It

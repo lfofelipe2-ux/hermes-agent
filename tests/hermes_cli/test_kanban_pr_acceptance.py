@@ -263,6 +263,7 @@ def bind(conn, tid, run_id, *, owner=None, repo="acme/repo", assignee="external-
 
 
 def gh_ok(monkeypatch, login="authorized-login"):
+    monkeypatch.setattr(store, "_gh_env", lambda home: {"TEST_BOUND_IDENTITY": "fixed"})
     monkeypatch.setattr(store, "_api", lambda endpoint, **kw: {"login": login} if endpoint == "user" else {"full_name": "acme/repo"})
     monkeypatch.setattr(store, "collect_acceptance", lambda *a, **kw: {"ok": True, "classification": "success"})
     from hermes_cli import profiles
@@ -359,3 +360,91 @@ def test_nonpaginated_graphql_shape_preserved(monkeypatch):
     monkeypatch.setattr(pr,"_gh_env",lambda p: {})
     monkeypatch.setattr(pr.subprocess,"run",lambda *a,**kw:types.SimpleNamespace(stdout='{"data":{"repository":{}}}'))
     assert pr._api("graphql",query="query",profile_home="existing") == {"data":{"repository":{}}}
+
+
+def test_native_review_handoff_retains_bound_identity(live_task, monkeypatch):
+    conn, tid, run_id = live_task
+    bind(conn, tid, run_id)
+    gh_ok(monkeypatch)
+    assert kb.request_review(conn, tid, expected_run_id=run_id)
+    prepared = store.prepare_acceptance(conn, tid, None, {})
+    assert prepared and prepared[1]["ok"]
+    assert store.record_acceptance(conn, tid, prepared)
+    assert kb.get_task(conn, tid).assignee == "external-root"
+
+
+def test_review_without_native_handoff_does_not_reuse_binding(live_task, monkeypatch):
+    conn, tid, run_id = live_task
+    bind(conn, tid, run_id)
+    gh_ok(monkeypatch)
+    conn.execute("UPDATE tasks SET status='review',claim_lock=NULL WHERE id=?", (tid,))
+    assert store.prepare_acceptance(conn, tid, run_id, {}) is False
+
+
+@pytest.mark.parametrize("field", ["profile", "expected_login"])
+def test_malformed_binding_produces_auth_receipt(live_task, monkeypatch, field):
+    conn, tid, run_id = live_task
+    bind(conn, tid, run_id)
+    gh_ok(monkeypatch)
+    row = conn.execute("SELECT id,payload FROM task_events WHERE kind='external_github_identity_bound'").fetchone()
+    payload = json.loads(row["payload"])
+    del payload[field]
+    conn.execute("UPDATE task_events SET payload=? WHERE id=?", (json.dumps(payload), row["id"]))
+    prepared = store.prepare_acceptance(conn, tid, run_id, {})
+    assert prepared[1]["classification"] == "auth"
+    assert store.record_acceptance(conn, tid, prepared) is False
+    assert kb.get_task(conn, tid).status == "running"
+
+
+@pytest.mark.parametrize("fault", [OSError("transport unavailable"), __import__("subprocess").TimeoutExpired("gh", 30)])
+def test_bound_preflight_infrastructure_failure_has_durable_receipt(live_task, monkeypatch, fault):
+    conn, tid, run_id = live_task
+    bind(conn, tid, run_id)
+    gh_ok(monkeypatch)
+    def fail(*args, **kwargs):
+        raise fault
+    monkeypatch.setattr(store, "_api", fail)
+    prepared = store.prepare_acceptance(conn, tid, run_id, {})
+    assert prepared[1]["classification"] == "infra"
+    assert store.record_acceptance(conn, tid, prepared) is False
+    assert conn.execute("SELECT count(*) FROM task_events WHERE kind='pr_acceptance'").fetchone()[0] == 1
+    assert kb.get_task(conn, tid).status == "running"
+
+
+def test_identity_environment_is_captured_once_for_entire_acceptance(live_task, monkeypatch):
+    conn, tid, run_id = live_task
+    bind(conn, tid, run_id)
+    gh_ok(monkeypatch)
+    captured = []
+    frozen = {"TEST_BOUND_IDENTITY": "one"}
+    def environment(home):
+        captured.append(home)
+        return frozen
+    monkeypatch.setattr(store, "_gh_env", environment)
+    observed = []
+    def api(endpoint, **kwargs):
+        observed.append(kwargs["child_env"])
+        return {"login": "authorized-login"} if endpoint == "user" else {"full_name": "acme/repo"}
+    def collect(*args, **kwargs):
+        observed.append(kwargs["child_env"])
+        return {"ok": True, "classification": "success"}
+    monkeypatch.setattr(store, "_api", api)
+    monkeypatch.setattr(store, "collect_acceptance", collect)
+    assert store.prepare_acceptance(conn, tid, run_id, {})[1]["ok"]
+    assert captured == ["/mock/profile"]
+    assert len(observed) == 3 and all(env is frozen for env in observed)
+
+
+def test_task_deleted_during_contract_upgrade_fails_closed(live_task, monkeypatch):
+    conn, tid, run_id = live_task
+    original = store._snapshot
+    calls = []
+    def snapshot(connection, task_id):
+        result = original(connection, task_id)
+        calls.append(task_id)
+        if len(calls) == 2:
+            connection.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+        return result
+    monkeypatch.setattr(store, "_snapshot", snapshot)
+    assert store.prepare_acceptance(conn, tid, run_id,
+        {"published_pr": "https://github.com/acme/repo/pull/7"}) is False
