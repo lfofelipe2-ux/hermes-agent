@@ -34,7 +34,7 @@ def _api(endpoint: str, *, query: str | None = None, paginate: bool = False,
     if query is not None:
         command += ["-f", "query=" + query]
     if paginate:
-        command += ["--paginate", "--slurp"]
+        command += ["--paginate"]
     try:
         result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True,
                                 text=True, encoding="utf-8", errors="replace", timeout=30,
@@ -49,7 +49,19 @@ def _api(endpoint: str, *, query: str | None = None, paginate: bool = False,
         if exc.returncode == 4:  # gh's authentication-required exit: this profile has no login
             raise _GateAuthError(f"gh has no login for {endpoint.split('?')[0]}") from None
         raise
-    value = json.loads(result.stdout)
+    if paginate:
+        # gh 2.45 emits one JSON document per page; --slurp requires newer gh.
+        decoder = json.JSONDecoder()
+        raw = result.stdout.lstrip()
+        value = []
+        while raw:
+            page, end = decoder.raw_decode(raw)
+            if isinstance(page, dict) and page.get("errors"):
+                raise ValueError("GitHub returned incomplete paginated evidence")
+            value.append(page)
+            raw = raw[end:].lstrip()
+    else:
+        value = json.loads(result.stdout)
     if isinstance(value, dict) and value.get("errors"):
         raise ValueError("GitHub returned incomplete GraphQL evidence")
     return value
