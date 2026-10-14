@@ -735,6 +735,10 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     timestamp line, runtime environment hints).  Worktree-dependent blocks follow project context so a
     shared context file can remain in the longest common prefix across worktrees.
     Never re-rendered mid-session."""
+    provider = getattr(agent, "prompt_context_provider", None)
+    if provider is not None:
+        from agent.canonical_prompt_context import build_canonical_prompt_parts
+        return build_canonical_prompt_parts(provider, system_message)
     # Model context window scales the context-file caps; stable per conversation.
     _cc_len = getattr(getattr(agent, "context_compressor", None), "context_length", None)
     _ctx_len = _cc_len if isinstance(_cc_len, int) and _cc_len > 0 else None
@@ -817,6 +821,9 @@ def invalidate_system_prompt(agent: Any) -> None:
     inside plugin-land. The previous bytes are stashed so a plugin whose render RAISES falls back to its
     last good section instead of vanishing (fail-open guard, not a freeze).
     """
+    provider = getattr(agent, "prompt_context_provider", None)
+    if provider is not None:
+        provider.invalidate()
     agent._cached_system_prompt = None
     agent._cached_system_prompt_static = None
     if hasattr(agent, "_plugin_system_prompt_sections_snapshot"):
