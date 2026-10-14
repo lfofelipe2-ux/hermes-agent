@@ -1294,7 +1294,7 @@ def _memory_provider_init_kwargs(agent, platform) -> dict[str, Any]:
     return kwargs
 
 
-def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
+def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None, builtin_memory_store=None):
     # Persistent memory (MEMORY.md + USER.md) — loaded from disk
     agent._memory_store = None
     agent._memory_enabled = False
@@ -1313,7 +1313,23 @@ def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
         "memory" in (agent.enabled_toolsets or [])
         and "memory" not in (agent.disabled_toolsets or [])
     )
-    if not skip_memory or _memory_toolset_requested:
+    if builtin_memory_store is not None:
+        # Trusted host-owned injection: no local MemoryStore construction or fallback.
+        # This replaces only the built-in store; external providers keep their lifecycle.
+        required = ("load_from_disk", "format_for_system_prompt", "target_enabled",
+                    "reset_consolidation_failures")
+        if (any(not callable(getattr(builtin_memory_store, name, None)) for name in required)
+                or type(getattr(builtin_memory_store, "memory_enabled", None)) is not bool
+                or type(getattr(builtin_memory_store, "user_profile_enabled", None)) is not bool):
+            raise TypeError("Injected built-in memory store does not implement the native contract")
+        from tools.memory_tool import get_builtin_memory_config
+        mem_config = get_builtin_memory_config(_agent_cfg)
+        agent._memory_enabled = builtin_memory_store.memory_enabled
+        agent._user_profile_enabled = builtin_memory_store.user_profile_enabled
+        agent._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
+        agent._memory_store = builtin_memory_store
+        agent._memory_store.load_from_disk()
+    elif not skip_memory or _memory_toolset_requested:
         # Memory is optional — don't break agent init
         with suppress(Exception):
             from tools.memory_tool import (
@@ -2365,7 +2381,7 @@ def init_agent(
     checkpoint_max_snapshots: int = 20, checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10, pass_session_id: bool = False,
     requested_provider: str | None = None, capabilities: Optional[dict[str, bool]] = None, cwd: Optional[str] = None,
-    side_agent: bool = False, memory_manager=None,
+    side_agent: bool = False, memory_manager=None, builtin_memory_store=None,
     tool_result_metadata_callback: Optional[Callable[..., dict]] = None,
 ):
     _install_safe_stdio()
@@ -2448,7 +2464,8 @@ def init_agent(
         _agent_cfg = {}
 
     _apply_display_config(agent, _agent_cfg, platform)
-    _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=memory_manager)
+    _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=memory_manager,
+                 builtin_memory_store=builtin_memory_store)
     _apply_agent_section(agent, _agent_cfg)
     cs = _parse_compression_config(agent, _agent_cfg)
     _config_context_length, _custom_providers, _effective_context_length, _model_cfg = _resolve_context_length(
