@@ -25,8 +25,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare isolated native test environment
-        run: bash setup-hermes.sh --runtime-only --test-environment
+      - name: Prepare pinned toolchain and isolated test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: python
+          extras: '[]'
+          test-environment: 'true'
       - name: Official isolated acceptance regressions
         env:
           HERMES_TEST_FILE_RETRIES: '0'
