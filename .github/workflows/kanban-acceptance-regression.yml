@@ -1,0 +1,39 @@
+name: Kanban acceptance regression
+
+on:
+  pull_request:
+    paths:
+      - hermes_cli/kanban_pr_acceptance.py
+      - hermes_cli/kanban_pr_acceptance_store.py
+      - tests/hermes_cli/test_kanban_pr_acceptance.py
+      - .github/workflows/kanban-acceptance-regression.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kanban-acceptance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare pinned toolchain and isolated test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: python
+          extras: '[]'
+          test-environment: 'true'
+      - name: Official isolated acceptance regressions
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: bash scripts/run_tests.sh tests/hermes_cli/test_kanban_pr_acceptance.py -j 1 --file-timeout 90
+      - name: Blocking repository lint checks
+        run: python3 scripts/check --base origin/main
