@@ -5,6 +5,7 @@ on:
     paths:
       - run_agent.py
       - agent/agent_init.py
+      - agent/agent_init_memory.py
       - tools/memory_tool.py
       - tests/agent/test_builtin_memory_injection.py
       - tests/tools/test_memory_tool.py
