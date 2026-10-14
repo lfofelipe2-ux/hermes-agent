@@ -227,6 +227,17 @@ def memory_tool(action: str | None = None, target: str = "memory", content: str 
     aliases ``content``."""
     if store is None:
         return tool_error("Memory is not available. It may be disabled in config or this environment.", success=False)
+    executor = getattr(store, "invoke_memory_tool", None)
+    if executor is not None:
+        # A trusted bound host store executes the original tool at its canonical
+        # owner, including approvals/metrics; never fall back to local file writes.
+        if not callable(executor):
+            raise TypeError("Injected memory tool executor must be callable")
+        result = executor(action=action, target=target, content=content, old_text=old_text,
+                          new_text=new_text, operations=operations)
+        if not isinstance(result, str):
+            raise TypeError("Injected memory tool executor must return native JSON text")
+        return result
     token = FAILURE_CLASS.set("other")
     try:
         outcome, result = _memory_tool(action, target, content, old_text, new_text, operations, store)

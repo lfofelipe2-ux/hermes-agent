@@ -1294,44 +1294,9 @@ def _memory_provider_init_kwargs(agent, platform) -> dict[str, Any]:
     return kwargs
 
 
-def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
-    # Persistent memory (MEMORY.md + USER.md) — loaded from disk
-    agent._memory_store = None
-    agent._memory_enabled = False
-    agent._user_profile_enabled = False
-    agent._memory_nudge_interval = 10
-    agent._turns_since_memory = 0
-    agent._iters_since_skill = 0
-    # skip_memory skips the external *provider*; enabled_toolsets=["memory"] still gets the
-    # built-in store so the memory tool never sees store=None.
-    # Flush/background agents can still pass enabled_toolsets=["memory"] so the built-in file store exists
-    # and the memory tool does not fail with store=None (#65429). A toolset on disabled_toolsets is not a
-    # request: a caller that denylists memory while its default toolset still names it must not get
-    # MEMORY.md loaded by an enabled-only check. (Cron agents now run with skip_memory=False and take the
-    # normal path here.)
-    _memory_toolset_requested = (
-        "memory" in (agent.enabled_toolsets or [])
-        and "memory" not in (agent.disabled_toolsets or [])
-    )
-    if not skip_memory or _memory_toolset_requested:
-        # Memory is optional — don't break agent init
-        with suppress(Exception):
-            from tools.memory_tool import (
-                MemoryStore, get_builtin_memory_config, get_builtin_memory_store_flags,
-            )
-            mem_config = get_builtin_memory_config(_agent_cfg)
-            agent._memory_enabled, agent._user_profile_enabled = get_builtin_memory_store_flags(
-                _agent_cfg
-            )
-            agent._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
-            if agent._memory_enabled or agent._user_profile_enabled:
-                agent._memory_store = MemoryStore(
-                    memory_char_limit=mem_config.get("memory_char_limit", 2200),
-                    user_char_limit=mem_config.get("user_char_limit", 1375),
-                    memory_enabled=agent._memory_enabled,
-                    user_profile_enabled=agent._user_profile_enabled,
-                )
-                agent._memory_store.load_from_disk()
+def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None, builtin_memory_store=None):
+    from agent.agent_init_memory import init_builtin_memory
+    mem_config = init_builtin_memory(agent, _agent_cfg, skip_memory, builtin_memory_store)
 
     # External memory provider plugin (one at a time, alongside built-in): memory.provider.
     agent._memory_manager = None
@@ -2365,7 +2330,7 @@ def init_agent(
     checkpoint_max_snapshots: int = 20, checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10, pass_session_id: bool = False,
     requested_provider: str | None = None, capabilities: Optional[dict[str, bool]] = None, cwd: Optional[str] = None,
-    side_agent: bool = False, memory_manager=None,
+    side_agent: bool = False, memory_manager=None, builtin_memory_store=None,
     tool_result_metadata_callback: Optional[Callable[..., dict]] = None,
 ):
     _install_safe_stdio()
@@ -2448,7 +2413,8 @@ def init_agent(
         _agent_cfg = {}
 
     _apply_display_config(agent, _agent_cfg, platform)
-    _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=memory_manager)
+    _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=memory_manager,
+                 builtin_memory_store=builtin_memory_store)
     _apply_agent_section(agent, _agent_cfg)
     cs = _parse_compression_config(agent, _agent_cfg)
     _config_context_length, _custom_providers, _effective_context_length, _model_cfg = _resolve_context_length(

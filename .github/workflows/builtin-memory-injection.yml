@@ -1,0 +1,41 @@
+name: Native built-in memory injection
+
+on:
+  pull_request:
+    paths:
+      - run_agent.py
+      - agent/agent_init.py
+      - agent/agent_init_memory.py
+      - tools/memory_tool.py
+      - tests/agent/test_builtin_memory_injection.py
+      - tests/tools/test_memory_tool.py
+      - .github/workflows/builtin-memory-injection.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: builtin-memory-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memory-injection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare pinned toolchain and isolated test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: python
+          extras: '[]'
+          test-environment: 'true'
+      - name: Official isolated native memory regressions
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: bash scripts/run_tests.sh tests/agent/test_builtin_memory_injection.py tests/tools/test_memory_tool.py -j 1 --file-timeout 90
+      - name: Blocking repository lint checks
+        run: python3 scripts/check --base origin/main
